@@ -1,0 +1,31 @@
+# Dependencies
+node_modules
+
+# Nuxt
+.nuxt
+.output
+.data
+
+# Logs
+*.log
+
+# Misc
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Editor
+.vscode
+.idea
+
+# Playwright
+playwright-report
+test-results
+.playwright-mcp
+
+# Debug screenshots
+drop-*.png
+
+# Build artifacts
+dist
