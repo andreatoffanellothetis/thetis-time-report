@@ -8,7 +8,8 @@
  * - email e identifier microsoft sono unique parziali (case-insensitive applicato in app)
  */
 
-import { boolean, date, integer, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
+import { boolean, check, date, index, integer, pgEnum, pgTable, text, time, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
 /* -------------------------------------------------------------------------- */
 /* Enums                                                                       */
@@ -160,3 +161,75 @@ export const leaveTypes = pgTable(
 
 export type LeaveType = typeof leaveTypes.$inferSelect
 export type NewLeaveType = typeof leaveTypes.$inferInsert
+
+/* -------------------------------------------------------------------------- */
+/* Time entries (ore inserite dai dipendenti)                                  */
+/* -------------------------------------------------------------------------- */
+
+export const timeEntrySourceEnum = pgEnum('time_entry_source', [
+  /** Inserita manualmente dal dipendente */
+  'manual',
+  /** Importata da export del gestionale presenze */
+  'imported',
+  /** Pre-fill da evento calendario Microsoft Outlook (poi confermata) */
+  'outlook',
+])
+export type TimeEntrySource = (typeof timeEntrySourceEnum.enumValues)[number]
+
+/**
+ * Ogni riga è un segmento di tempo nella giornata di un dipendente.
+ *
+ * Due forme alternative (XOR enforced via CHECK):
+ * - **Su commessa**: `projectId` set, `leaveTypeId` null
+ * - **Assenza/permesso**: `leaveTypeId` set, `projectId` null
+ *
+ * `startTime`/`endTime` sono opzionali: una entry può essere "numerica"
+ * (solo durata, senza orari precisi nella giornata) oppure "a blocco
+ * orario" (con start/end). `durationMinutes` è sempre presente.
+ *
+ * `externalId` consente import idempotenti da fonti esterne (export
+ * gestionale, calendario Outlook): la coppia (source, externalId) è unica
+ * quando externalId è valorizzato.
+ */
+export const timeEntries = pgTable(
+  'time_entries',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    date: date().notNull(),
+    startTime: time(),
+    endTime: time(),
+    durationMinutes: integer().notNull(),
+    projectId: uuid().references(() => projects.id, { onDelete: 'restrict' }),
+    leaveTypeId: uuid().references(() => leaveTypes.id, { onDelete: 'restrict' }),
+    comment: text(),
+    source: timeEntrySourceEnum().notNull().default('manual'),
+    externalId: text(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('time_entries_user_date_idx').on(t.userId, t.date),
+    index('time_entries_project_idx').on(t.projectId),
+    uniqueIndex('time_entries_external_unique')
+      .on(t.source, t.externalId)
+      .where(sql`${t.externalId} IS NOT NULL`),
+    check(
+      'time_entries_kind_xor',
+      sql`(${t.projectId} IS NOT NULL)::int + (${t.leaveTypeId} IS NOT NULL)::int = 1`,
+    ),
+    check(
+      'time_entries_duration_positive',
+      sql`${t.durationMinutes} > 0`,
+    ),
+    check(
+      'time_entries_time_range',
+      sql`(${t.startTime} IS NULL AND ${t.endTime} IS NULL) OR (${t.startTime} IS NOT NULL AND ${t.endTime} IS NOT NULL AND ${t.endTime} > ${t.startTime})`,
+    ),
+  ],
+)
+
+export type TimeEntry = typeof timeEntries.$inferSelect
+export type NewTimeEntry = typeof timeEntries.$inferInsert

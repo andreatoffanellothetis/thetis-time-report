@@ -17,8 +17,9 @@ loadDotenv({ path: '.env.local' })
 const url = process.env.NUXT_DATABASE_URL
 if (!url) throw new Error('NUXT_DATABASE_URL mancante (.env.local)')
 
-const { users, userRoles, projects, leaveTypes } = await import('../server/db/schema')
-const db = drizzle(neon(url), { schema: { users, userRoles, projects, leaveTypes }, casing: 'snake_case' })
+const schema = await import('../server/db/schema')
+const { users, userRoles, projects, leaveTypes, timeEntries } = schema
+const db = drizzle(neon(url), { schema, casing: 'snake_case' })
 
 /* ----------------------------- Helpers ----------------------------- */
 
@@ -186,10 +187,123 @@ for (const lt of leaveTypesData) {
   console.log(`  ${lt.code.padEnd(15)} ${lt.name}`)
 }
 
-console.log('\n✔ Seed completato.')
-console.log(`  ${empMap.size} users, ${projMap.size} projects, ${leaveTypesData.length} leave_types`)
+/* ----------------------------- Time entries (import) ----------------------------- */
 
-// Sanity check: ruoli admin
+function dateFromExcel(v: unknown): string | null {
+  if (!(v instanceof Date)) return null
+  const y = v.getUTCFullYear()
+  const m = String(v.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(v.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function timeFromExcel(v: unknown): string | null {
+  if (!(v instanceof Date)) return null
+  const h = String(v.getUTCHours()).padStart(2, '0')
+  const m = String(v.getUTCMinutes()).padStart(2, '0')
+  const s = String(v.getUTCSeconds()).padStart(2, '0')
+  return `${h}:${m}:${s}`
+}
+
+function minutesFromExcel(v: unknown): number {
+  if (!(v instanceof Date)) return 0
+  return v.getUTCHours() * 60 + v.getUTCMinutes()
+}
+
+// Mappe lookup per FK
+const usersByExt = new Map<string, string>() // externalId → id
+const projectsByExt = new Map<string, string>() // externalId → id
+
+for (const row of await db.select({ id: users.id, externalId: users.externalId }).from(users)) {
+  if (row.externalId) usersByExt.set(row.externalId, row.id)
+}
+for (const row of await db.select({ id: projects.id, externalId: projects.externalId }).from(projects)) {
+  if (row.externalId) projectsByExt.set(row.externalId, row.id)
+}
+
+// Tabula rasa degli import precedenti (idempotenza brutale per dev)
+const deleted = await db
+  .delete(timeEntries)
+  .where(eq(timeEntries.source, 'imported'))
+  .returning({ id: timeEntries.id })
+console.log(`\n→ Cleared ${deleted.length} previously imported entries`)
+
+const entriesToInsert: Array<{
+  userId: string
+  date: string
+  startTime: string | null
+  endTime: string | null
+  durationMinutes: number
+  projectId: string
+  source: 'imported'
+  externalId: string
+  comment: string | null
+}> = []
+
+const empIdLogsCol = colIdx(logs.headers, 'Numero ID dipendente')
+const dateCol = colIdx(logs.headers, 'Data')
+const inCol = colIdx(logs.headers, 'Entrata')
+const outCol = colIdx(logs.headers, 'Uscita')
+const durCol = colIdx(logs.headers, 'Durata')
+const pidLogsCol = colIdx(logs.headers, 'ID progetto')
+const commentCol = colIdx(logs.headers, 'Commento')
+
+let skippedNoUser = 0
+let skippedNoProject = 0
+let skippedBadTime = 0
+
+for (let i = 3; i <= logs.ws.rowCount; i++) {
+  const row = logs.ws.getRow(i)
+  const empExt = row.getCell(empIdLogsCol).value
+  const projExt = row.getCell(pidLogsCol).value
+  const dateVal = row.getCell(dateCol).value
+  const inVal = row.getCell(inCol).value
+  const outVal = row.getCell(outCol).value
+  const durVal = row.getCell(durCol).value
+  const commentVal = row.getCell(commentCol).value
+
+  const userId = empExt ? usersByExt.get(String(empExt)) : undefined
+  const projectId = projExt ? projectsByExt.get(String(projExt)) : undefined
+  const dateStr = dateFromExcel(dateVal)
+  const startStr = timeFromExcel(inVal)
+  const endStr = timeFromExcel(outVal)
+  const durMin = minutesFromExcel(durVal)
+
+  if (!userId) { skippedNoUser++; continue }
+  if (!projectId) { skippedNoProject++; continue }
+  if (!dateStr || !startStr || !endStr || durMin <= 0) { skippedBadTime++; continue }
+  if (startStr >= endStr) { skippedBadTime++; continue }
+
+  entriesToInsert.push({
+    userId,
+    date: dateStr,
+    startTime: startStr,
+    endTime: endStr,
+    durationMinutes: durMin,
+    projectId,
+    source: 'imported',
+    externalId: `gestionale:${empExt}:${dateStr}:${startStr}:${projExt}`,
+    comment: typeof commentVal === 'string' && commentVal.trim() ? commentVal.trim() : null,
+  })
+}
+
+console.log(`\n→ Importing ${entriesToInsert.length} time entries...`)
+console.log(`  skipped: ${skippedNoUser} no-user, ${skippedNoProject} no-project, ${skippedBadTime} bad-time`)
+
+// Bulk insert a batch di 200 per non superare limiti (parametri SQL)
+const BATCH = 200
+let inserted = 0
+for (let i = 0; i < entriesToInsert.length; i += BATCH) {
+  const batch = entriesToInsert.slice(i, i + BATCH)
+  await db.insert(timeEntries).values(batch)
+  inserted += batch.length
+  process.stdout.write(`\r  inserted ${inserted}/${entriesToInsert.length}`)
+}
+console.log()
+
+console.log('\n✔ Seed completato.')
+console.log(`  ${empMap.size} users, ${projMap.size} projects, ${leaveTypesData.length} leave_types, ${entriesToInsert.length} time_entries`)
+
 const adminCount = await db.execute(
   sql`SELECT COUNT(*)::int AS n FROM user_roles WHERE role = 'admin'`,
 )

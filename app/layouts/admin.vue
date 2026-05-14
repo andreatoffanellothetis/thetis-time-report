@@ -5,6 +5,7 @@ const sections = [
   { to: '/admin/projects', label: 'Commesse', icon: 'i-lucide-briefcase' },
   { to: '/admin/holidays', label: 'Festività', icon: 'i-lucide-calendar-days' },
   { to: '/admin/leave-types', label: 'Tipi orario', icon: 'i-lucide-clock-3' },
+  { to: '/admin/time-entries', label: 'Ore', icon: 'i-lucide-list' },
 ]
 </script>
 
