@@ -2,7 +2,11 @@
 export default defineNuxtConfig({
   compatibilityDate: '2025-05-01',
   devtools: { enabled: true },
-  modules: ['@nuxt/ui', '@pinia/nuxt'],
+  modules: ['@nuxt/ui', '@pinia/nuxt', 'nuxt-auth-utils'],
+
+  runtimeConfig: {
+    databaseUrl: '',
+  },
   css: ['~/assets/css/main.css'],
   components: [
     { path: '~/components', pathPrefix: false },
@@ -18,7 +22,7 @@ export default defineNuxtConfig({
     },
   },
   nitro: {
-    preset: 'static',
+    preset: 'vercel',
   },
   vite: {
     worker: {
