@@ -15,6 +15,13 @@
       "when": 1778760512471,
       "tag": "0001_even_quicksilver",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778761791474,
+      "tag": "0002_regular_warpath",
+      "breakpoints": true
     }
   ]
 }

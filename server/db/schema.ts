@@ -29,6 +29,8 @@ export const users = pgTable(
     displayName: text().notNull(),
     /** Object ID Microsoft Entra ID — popolato dopo lo switch da stub a SSO reale. */
     microsoftOid: text(),
+    /** ID del gestionale presenze esterno — per join con export Excel storici. */
+    externalId: text(),
     active: boolean().notNull().default(true),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -36,6 +38,7 @@ export const users = pgTable(
   (t) => [
     uniqueIndex('users_email_unique').on(t.email),
     uniqueIndex('users_microsoft_oid_unique').on(t.microsoftOid),
+    uniqueIndex('users_external_id_unique').on(t.externalId),
   ],
 )
 
@@ -82,11 +85,16 @@ export const projects = pgTable(
     name: text().notNull(),
     client: text(),
     color: text().notNull().default('#64748b'),
+    /** ID del gestionale esterno — per join con export Excel storici. */
+    externalId: text(),
     archivedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('projects_code_unique').on(t.code)],
+  (t) => [
+    uniqueIndex('projects_code_unique').on(t.code),
+    uniqueIndex('projects_external_id_unique').on(t.externalId),
+  ],
 )
 
 export type Project = typeof projects.$inferSelect
