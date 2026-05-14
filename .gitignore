@@ -29,3 +29,4 @@ drop-*.png
 
 # Build artifacts
 dist
+.vercel
